@@ -13,6 +13,7 @@ import datetime
 import time
 import os
 import socket
+import struct
 
 SERVER_LOG_PATH = '/home/alex/.ja/MBII/server.log'
 
@@ -33,6 +34,8 @@ MSG_VOTATION_INITIALIZED = 'Shuffle votation initialized!'
 VOTATION_MAX_TIME_TO_FAIL = 5
 
 MSG_PLATERS_WANTS = '{}/{} players wants to Shuffle!'
+
+DEFAULT_MESSAGE_DECODER = 'iso-8859-1'
 
 class Console:
 	@staticmethod
@@ -138,8 +141,8 @@ class Server:
 		data = ("\xff\xff\xff\xffrcon %s\n" % (data))
 		sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 		sock.sendto(data, (self.host, self.port))
-		receivedData = sock.recv(1024)
-		print("\nServer Response: {}".format(receivedData[9:-1]))
+		receivedData = self.recv_timeout(sock)
+		print(receivedData.decode(DEFAULT_MESSAGE_DECODER).strip())
 
 	def sendRconCmdWithParameter(self, cmd, parameter):
 		data = ("%s %s %s" % (self.rconPassword, cmd, parameter))
@@ -153,10 +156,45 @@ class Server:
 		self.sendRconCmdWithParameter("svsay", msg)
 
 	def sendShuffle(self):
-		self.sendRconCmdWithParameter("smod", "shuffle")
+		self.sendRconCmd("shuffle")
 
 	def requestStatus(self):
 		self.sendRconCmd("status")
+
+	def recv_timeout(self, the_socket,timeout=2):
+		#make socket non blocking
+		the_socket.setblocking(0)
+		
+		#total data partwise in an array
+		total_data=[];
+		data='';
+		
+		#beginning time
+		begin=time.time()
+		while 1:
+			#if you got some data, then break after timeout
+			if total_data and time.time()-begin > timeout:
+				break
+			
+			#if you got no data at all, wait a little longer, twice the timeout
+			elif time.time()-begin > timeout*2:
+				break
+			
+			#recv something
+			try:
+				data = the_socket.recv(8192)
+				if data:
+					total_data.append(data)
+					#change the beginning time for measurement
+					begin=time.time()
+				else:
+					#sleep for sometime to indicate a gap
+					time.sleep(0.1)
+			except:
+				pass
+		
+		#join all parts to make final string
+		return ''.join(total_data)
 
 
 
@@ -168,9 +206,11 @@ if __name__ == "__main__":
 
 	server = Server(SERVER_IP, SERVER_PORT, SERVER_RCON_PWD)
 
+	#server.sendShuffle()
+
 	print(server.requestStatus())
 
-	while True:
+	while False:
 		time.sleep(1)
 
 		if logFile.isChanged():
