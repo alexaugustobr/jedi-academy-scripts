@@ -12,8 +12,9 @@ import re
 import datetime
 import time
 import os
+import socket
 
-SERVER_LOG_PATH = '$HOME/.ja/MBII/server.log'
+SERVER_LOG_PATH = '/home/alex/.ja/MBII/server.log'
 
 #SERVER_ROOT_PWD = ''
 #SERVER_IP = ''

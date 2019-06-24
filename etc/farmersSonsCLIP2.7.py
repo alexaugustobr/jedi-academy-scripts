@@ -9,7 +9,7 @@ EVENT_SERVER = "localhost"
 class Server:
 	host = ""
 	port = 0
-	rconPassword = ""
+	rconPassword = "rcon"
 	name = ""
 	serverPassword = ""
 	id = 0
@@ -23,15 +23,15 @@ class Server:
 		self.cheats = cheats
 
 	def sendData(self, data):
-		print data
+		print(data)
 		data = ("\xff\xff\xff\xffrcon %s" % (data))
 		sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 		sock.sendto(data + "\n", (self.host, self.port))
 		receivedData = sock.recv(1024)
 		if "ShutdownGame:" in receivedData:
-			print "\nServer Response: Map is loading!"
+			print("\nServer Response: Map is loading!")
 		else:
-			print "\nServer Response: {}".format(receivedData[9:-1])
+			print( "\nServer Response: {}".format(receivedData[9:-1]))
 
 	def sendRconCmd(self, cmd, parameter):
 		data = ("%s %s %s" % (self.rconPassword, cmd, parameter))
@@ -162,8 +162,7 @@ def drawMenu():
 		print "Invalid option"
 
 def buildServers():
-	farm = Server(1,FARM_SERVER, 29075, "rconbobomg", "The Farmer Sons Sever", "", True)
-	farmEvent = Server(2,EVENT_SERVER, 29075, "rconbobomg", "The Farmer Sons Event Server", "", True)
+	farm = Server(1,FARM_SERVER, 29070, "rcon", "The Farmer Sons Sever", "", True)
 	servers.append(farm)
 
 def main():

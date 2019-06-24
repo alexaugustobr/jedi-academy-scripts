@@ -1,4 +1,4 @@
-#!/usr/bin/python2
+#!/usr/bin/python2.7
 
 #(.[0-9]*:.[0-9]*) (.*[0-9]:) (say:) (.*:) ("![s|n|y|N|S|Y|0|1]")
 # 30:04 0: say: ^2Tigao: "lol"
@@ -12,11 +12,27 @@ import re
 import datetime
 import time
 import os
+import socket
 
-SERVER_LOG_PATH = '$HOME/.ja/MBII/server.log'
+SERVER_LOG_PATH = '/home/alex/.ja/MBII/server.log'
 
-#SERVER_ROOT_PWD = ''
-#SERVER_IP = ''
+REGEX_SAY_COMMAND = r'(.[0-9]*:.[0-9]*) (.*[0-9]:) (say:) (.*:) ("!(shuffle|shufle|sh)")'
+
+SERVER_RCON_PWD = 'rcon'
+SERVER_IP = '127.0.1.1'
+SERVER_PORT = 29070
+
+MSG_ONLINE = 'Shuffle votation is on!'
+
+MSG_VOTATION_PASS = 'Shuffle passed!'
+
+MSG_VOTATION_FAIL = 'Shuffle failed!'
+
+MSG_VOTATION_INITIALIZED = 'Shuffle votation initialized!'
+
+VOTATION_MAX_TIME_TO_FAIL = 5
+
+MSG_PLATERS_WANTS = '{}/{} players wants to Shuffle!'
 
 class Console:
 	@staticmethod
@@ -45,14 +61,11 @@ class LogFile():
 		
 class VoteExtractor:
 
-	REGEX_SAY_COMMAND = r'(.[0-9]*:.[0-9]*) (.*[0-9]:) (say:) (.*:) ("![s|n|y|N|S|Y|0|1]")'
-
-	def extractFromStringWithRegex(self, regex, stringToExtract):
-		result = re.search(regex, stringToExtract)
-		return result
+	def __init__(self, regex):
+		self.regex = regex
 
 	def extract(self, stringToExtract):
-		result = self.extractFromStringWithRegex(self.REGEX_SAY_COMMAND, stringToExtract)
+		result = re.search(self.regex, stringToExtract)
 
 		if (not result):
 			return None
@@ -61,18 +74,14 @@ class VoteExtractor:
 		playerId = result.group(2).strip()
 		playerName = result.group(4).strip()
 		optionMessage = result.group(5).strip()
-		favorable = VoteOptionParser.isFavorable(optionMessage)
 		
-		return Vote(messageId, playerId, playerName, optionMessage, favorable)
+		return Vote(messageId, playerId, playerName, optionMessage)
 
-class Scoreboard:
+class Votation:
 
 	voteDict = {}
-	votesAgainst = 0
-	votesInFavor = 0
-
-	def __init__(self):
-		pass
+	votes = 0
+	totalPlayers = 0
 	
 	def addVote(self, vote):
 		self.voteDict[vote.playerId] = vote
@@ -80,32 +89,32 @@ class Scoreboard:
 	def calculate(self):
 		for key in self.voteDict.keys():
 			vote = self.voteDict[key]
+			votes = votes + 1
 
-			if vote.favorable:
-				self.votesInFavor = self.votesInFavor + 1
-			else:
-				self.votesAgainst = self.votesAgainst + 1
+	def reset(self):
+		self.voteDict = {}
+		self.votes = 0
+		self.totalPlayers = 0
 
 	def isPassed(self):
-		return self.votesInFavor > self.votesAgainst
+		return self.votes > self.totalPlayers
 
 	def __str__(self):
 		strx = """
-		votesAgainst = {}
-		votesInFavor = {}
-		passed = {}
-		""".format(self.votesAgainst, self.votesInFavor, self.isPassed())
+		votes = {}
+		totalPlayers = {}
+		isPassed = {}
+		""".format(self.votes, self.totalPlayers, self.isPassed())
 		return strx
 		
 
 class Vote:
 
-	def __init__(self, messageId, playerId, playerName, optionMessage, favorable):
+	def __init__(self, messageId, playerId, playerName, optionMessage):
 		self.messageId = messageId
 		self.playerId = playerId
 		self.playerName = playerName
 		self.optionMessage = optionMessage 
-		self.favorable = favorable
 
 	def __str__(self):
 
@@ -114,57 +123,69 @@ class Vote:
 		playerId = {}
 		playerName = {}
 		optionMessage  = {}
-		favorable = {}
-		""".format(self.messageId, self.playerId, self.playerName, self.optionMessage, self.favorable)
+		""".format(self.messageId, self.playerId, self.playerName, self.optionMessage)
 
 		return strx
 
-class VoteOptionParser:
+class Server:
 
-	@staticmethod
-	def isFavorable(optionMessage):
-		REGEX_FAVORABLE_VOTE = r'("![s|y|S|Y|1]")'
-		
-		result = re.search(REGEX_FAVORABLE_VOTE, optionMessage)
-		
-		if result:
-			return True
-		else:
-			return False
-		
-	@staticmethod
-	def isAgainst(optionMessage):
-		REGEX_AGAINST_VOTE = r'("![n|N|0]")'
-		
-		result = re.search(REGEX_AGAINST_VOTE, optionMessage)
-		
-		if result:
-			return True
-		else:
-			return False
+	def __init__(self, host, port, rconPassword):
+		self.rconPassword = rconPassword
+		self.host = host
+		self.port = port
+
+	def sendData(self, data):
+		data = ("\xff\xff\xff\xffrcon %s\n" % (data))
+		sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+		sock.sendto(data, (self.host, self.port))
+		receivedData = sock.recv(1024)
+		print("\nServer Response: {}".format(receivedData[9:-1]))
+
+	def sendRconCmdWithParameter(self, cmd, parameter):
+		data = ("%s %s %s" % (self.rconPassword, cmd, parameter))
+		self.sendData(data)
+
+	def sendRconCmd(self, cmd):
+		data = ("%s %s" % (self.rconPassword, cmd))
+		self.sendData(data)
+
+	def sendMessage(self, msg):
+		self.sendRconCmdWithParameter("svsay", msg)
+
+	def sendShuffle(self):
+		self.sendRconCmdWithParameter("smod", "shuffle")
+
+	def requestStatus(self):
+		self.sendRconCmd("status")
+
+
 
 if __name__ == "__main__":
 
 	logFile = LogFile(SERVER_LOG_PATH)
 
-	voteExtractor = VoteExtractor()
+	voteExtractor = VoteExtractor(REGEX_SAY_COMMAND)
+
+	server = Server(SERVER_IP, SERVER_PORT, SERVER_RCON_PWD)
+
+	print(server.requestStatus())
 
 	while True:
 		time.sleep(1)
 
 		if logFile.isChanged():
 
-			scoreboard = Scoreboard()
+			votation = Votation()
 
 			text = logFile.read()
 
 			for textLine in text:
 				vote = voteExtractor.extract(textLine)
 				if vote:
-					scoreboard.addVote(vote)
+					votation.addVote(vote)
 			
-			scoreboard.calculate()
+			votation.calculate()
 
-			Console.info(scoreboard)
+			Console.info(votation)
 
 
