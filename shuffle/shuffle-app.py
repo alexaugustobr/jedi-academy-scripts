@@ -29,7 +29,7 @@ Special thanks to:
 	* Movie Battles 2 developer team
 	* OpenJediAcademy team
 	* Movie Battles 2 Brasil team
-	* Tigão
+	* Tigao
 
 Author: https://github.com/alexcologia33
 
