@@ -1,40 +1,82 @@
 #!/usr/bin/python2.7
 
-#(.[0-9]*:.[0-9]*) (.*[0-9]:) (say:) (.*:) ("![s|n|y|N|S|Y|0|1]")
-# 30:04 0: say: ^2Tigao: "lol"
-# 0:22 say: Server: lol say: dasdsad
+"""
+License: MIT
 
-# 35:52 ClientDisconnect: 0
+Description:
+	Poll like script for mb2, for shuffle the team, to vote type !sf or !shuffle
 
-#(?:intended)(.*)(?:to match)
+Requirements:
+	* Python 2.7
+	* Updated Movie battles 2 and Jedi academy
+	* Server with log enabled, example config with cvars:
+		* seta g_log "server.log"
+		* seta g_logClientInfo "1"
+		* seta g_logSync "1"
+		* seta g_logExplicit "3"
+
+Todo:
+    * Ao mudar de mapa, resetar o shuffle
+    * Nao contar votos de spec
+	* Tempo limite de votacao
+	* Encapsular app
+	* Mensagens customizadas para o minimo de jogadores para o shuffle
+	* Thread assincrona para mensagens de status do shuffle poll
+
+Special thanks to:
+	* Lucas arts
+	* Jedi academy developer team
+	* Movie Battles 2 developer team
+	* OpenJediAcademy team
+
+Author: https://github.com/alexcologia33
+
+Last version: https://github.com/alexcologia33/mb2-jedi-academy-scripts/tree/master/shuffle
+"""
 
 import re
 import datetime
 import time
 import os
 import socket
+import json
+import unicodedata
+import os
 
-SERVER_LOG_PATH = '/home/alex/.ja/MBII/server.log'
+CONFIG_FILE_NAME = 'shuffle-config.json'
+
+class ConfigLoader:
+	def loadConfigAsDict(self):
+		with open(CONFIG_FILE_NAME) as json_data_file:
+			data = json.load(json_data_file, encoding='iso-8859-1')
+			return data
+
+def normalize(string):
+	return unicodedata.normalize('NFKD', string).encode('ascii', 'ignore')
+
+
+data = ConfigLoader().loadConfigAsDict()
+
+SERVER_LOG_PATH = os.path.expanduser(normalize(data['SERVER_LOG_PATH']))
+SERVER_RCON_PWD = normalize(data['SERVER_RCON_PWD']) #'rcon'
+SERVER_IP = normalize(data['SERVER_IP']) #'127.0.1.1'
+SERVER_PORT = normalize(data['SERVER_PORT']) #29070
 
 REGEX_SAY_COMMAND = r'(.[0-9]*:.[0-9]*) (.*[0-9]:) (say:) (.*:) ("!(shuffle|sf)")'
 
 REGEX_PLAYER_Disconnected = r'(ClientDisconnect:(.[0-9]*))'
 
-SERVER_RCON_PWD = 'rcon'
-SERVER_IP = '127.0.1.1'
-SERVER_PORT = 29070
-
-MSG_ONLINE = 'Shuffle votation is on!'
+MSG_ONLINE = 'Shuffle poll is on!'
 
 MSG_VOTATION_PASS = 'Shuffle passed!'
 
 MSG_VOTATION_FAIL = 'Shuffle failed!'
 
-MSG_VOTATION_INITIALIZED = 'Shuffle votation initialized!'
+MSG_VOTATION_INITIALIZED = 'Shuffle poll initialized!'
 
 VOTATION_MAX_TIME_TO_FAIL = 5
 
-MSG_TOTAL_PLAYERS_WANTS = '{}/{} players wants to shuffle the team!'
+MSG_TOTAL_PLAYERS_WANTS = '{} players wants to shuffle, more {} needed!'
 
 MSG_PLAYER_WANT = '{} ^7wants to Shuffle the team!'
 
@@ -46,13 +88,15 @@ LOOP_TIME = 5
 
 IS_DEBUG_ENABLED = True
 
-SHUFFLE_ENABLED = 'Shuffle votation is enabled on the server! Say ^3!sf ^7or ^3!shuffle ^7for vote!'
+SHUFFLE_ENABLED = 'Shuffle poll is enabled on the server! Say ^3!sf ^7or ^3!shuffle ^7for vote!'
 
-MIN_PLAYERS_TO_VOTE = 3
+MIN_PLAYERS_TO_VOTE = 2
 
 MIN_PERCENT_PLAYERS_TO_WIN = 0.6
 
 getOnlyDigitsAsInt = lambda x: int(filter(str.isdigit, x) or None)
+
+MSG_RESTART_SCRIPT = 'Restarting the script.'
 
 class Console:
 	@staticmethod
@@ -64,6 +108,11 @@ class Console:
 		if IS_DEBUG_ENABLED:
 			finalMessage = '({}) DEBUG: {}'.format(datetime.datetime.now(), message)
 			print(finalMessage)
+
+	@staticmethod
+	def error(message):
+		finalMessage = '({}) ERROR: {}'.format(datetime.datetime.now(), message)
+		print(finalMessage)
 
 class LogFile:
 	def __init__(self, serverLogPath):
@@ -131,7 +180,7 @@ class PlayerDisconnectedExtractor:
 
 		return int(getOnlyDigitsAsInt(playerId))
 
-class Votation:
+class Poll:
 
 	def __init__(self):
 		pass
@@ -143,6 +192,7 @@ class Votation:
 	def addVote(self, vote):
 		playerId = int(getOnlyDigitsAsInt(vote.playerId))
 		self.voteDict[playerId] = vote
+		poll.calculate()
 
 	def playerHasVoted(self, playerId):
 		return playerId in self.voteDict.keys()
@@ -150,6 +200,7 @@ class Votation:
 	def removeVote(self, playerId):
 		if playerId in self.voteDict.keys():
 			del self.voteDict[playerId]
+			poll.calculate()
 
 	def calculate(self):
 		self.totalVotes = len(self.voteDict.keys())
@@ -210,7 +261,7 @@ class Server:
 		data = ("\xff\xff\xff\xff%s\n" % data)
 		#Console.debug("%r"%data)
 		sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-		sock.sendto(data, (self.host, self.port))
+		sock.sendto(data, (self.host, getOnlyDigitsAsInt(self.port)))
 		receivedData = self.recvWithTimeout(sock)
 		decodeMessage = receivedData.decode(DEFAULT_MESSAGE_DECODER).strip()
 		return decodeMessage
@@ -286,63 +337,64 @@ class Server:
 
 
 if __name__ == "__main__":
-	logFile = LogFile(SERVER_LOG_PATH)
-	lastReadedLineNumber = logFile.lastLineNumber
-	voteExtractor = VoteExtractor(REGEX_SAY_COMMAND)
-	playerDisconnectedExtractor = PlayerDisconnectedExtractor(REGEX_PLAYER_Disconnected)
-	server = Server(SERVER_IP, SERVER_PORT, SERVER_RCON_PWD)
-
-	server.sendMessage(SHUFFLE_ENABLED)
-
-	votation = Votation()
-
 	while True:
-		time.sleep(LOOP_TIME)
-
-		if logFile.isChanged():
-			votation.totalPlayers = server.requestPlayerCount()
-			Console.debug('File has changed, reading the new lines only!')
-			text = logFile.readAsArray()
-
-			for i in range(lastReadedLineNumber, logFile.lastLineNumber):
-				textLine = text[i]
-				Console.debug("line {}: {}".format(i, textLine))
-				vote = voteExtractor.extract(textLine)
-
-				if vote and not votation.playerHasVoted(getOnlyDigitsAsInt(vote.playerId)):
-					votation.addVote(vote)
-					server.sendMessage(MSG_PLAYER_WANT.format(vote.playerName))
-
-					if votation.totalVotes > 0:
-						server.sendMessage(MSG_TOTAL_PLAYERS_WANTS.format(votation.totalVotes, votation.totalPlayers))
-
-				disconnectedPlayerId = playerDisconnectedExtractor.extract(textLine)
-				if disconnectedPlayerId and votation.playerHasVoted(disconnectedPlayerId):
-					votation.removeVote(disconnectedPlayerId)
-					server.sendMessage(MSG_PLAYER_REMOVED_FROM_VOTES.format(disconnectedPlayerId))
-
-					if votation.totalVotes > 0:
-						server.sendMessage(MSG_TOTAL_PLAYERS_WANTS.format(votation.totalVotes, votation.totalPlayers))
-
+		try:
+			logFile = LogFile(SERVER_LOG_PATH)
 			lastReadedLineNumber = logFile.lastLineNumber
-			votation.calculate()
-			Console.info(votation)
+			voteExtractor = VoteExtractor(REGEX_SAY_COMMAND)
+			playerDisconnectedExtractor = PlayerDisconnectedExtractor(REGEX_PLAYER_Disconnected)
+			server = Server(SERVER_IP, SERVER_PORT, SERVER_RCON_PWD)
 
-			if votation.isPassed():
-				server.sendMessage(MSG_VOTATION_PASS)
-				votation.reset()
-				server.sendShuffle()
+			server.sendMessage(SHUFFLE_ENABLED)
 
+			poll = Poll()
 
+			while True:
+				time.sleep(LOOP_TIME)
 
-#TODO
-#Ao mudar de mapa, resetar o shuffle
-#Config externa
-#tempo limite de votacao
-#ao votar 2x nao exibir a mensagem
-#
+				#Will only read the unreaded lines if the file has been changed
+				if logFile.isChanged():
+					poll.totalPlayers = server.requestPlayerCount()
+					Console.debug('File has changed, reading the new lines only!')
+					text = logFile.readAsArray()
 
-	
+					for i in range(lastReadedLineNumber, logFile.lastLineNumber):
+						textLine = text[i]
+						Console.debug("line {}: {}".format(i, textLine))
+						vote = voteExtractor.extract(textLine)
+
+						if vote and not poll.playerHasVoted(getOnlyDigitsAsInt(vote.playerId)):
+							poll.addVote(vote)
+							server.sendMessage(MSG_PLAYER_WANT.format(vote.playerName))
+
+							if poll.totalVotes > 0:
+								server.sendMessage(
+									MSG_TOTAL_PLAYERS_WANTS.format(poll.totalVotes, poll.totalVotesNeedToWin()-poll.totalVotes))
+
+						disconnectedPlayerId = playerDisconnectedExtractor.extract(textLine)
+						if disconnectedPlayerId and poll.playerHasVoted(disconnectedPlayerId):
+							poll.removeVote(disconnectedPlayerId)
+							server.sendMessage(MSG_PLAYER_REMOVED_FROM_VOTES.format(disconnectedPlayerId))
+
+							if poll.totalVotes > 0:
+								server.sendMessage(
+									MSG_TOTAL_PLAYERS_WANTS.format(poll.totalVotes, poll.totalPlayers))
+
+					lastReadedLineNumber = logFile.lastLineNumber
+					# double check, this may be not necessary
+					poll.calculate()
+					Console.info(poll)
+
+					if poll.isPassed():
+						server.sendMessage(MSG_VOTATION_PASS)
+						poll.reset()
+						server.sendShuffle()
+
+		except Exception as e:
+			Console.error(e)
+			Console.info(MSG_RESTART_SCRIPT)
+			time.sleep(LOOP_TIME*2)
+
 
 			
 

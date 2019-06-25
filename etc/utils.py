@@ -1,4 +1,12 @@
 
+
+(.[0-9]*:.[0-9]*) (.*[0-9]:) (say:) (.*:) ("![s|n|y|N|S|Y|0|1]")
+	*  30:04 0: say: ^2Tigao: "lol"
+	*  0:22 say: Server: lol say:
+	* * 35:52 ClientDisconnect: 0
+	* (?:intended)(.*)(?:to match)
+
+
 import re
 import datetime
 import time
