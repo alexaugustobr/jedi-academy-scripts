@@ -196,7 +196,11 @@ class Poll:
 		poll.calculate()
 
 	def playerHasVoted(self, playerId):
-		return playerId in self.voteDict.keys()
+		if playerId is None:
+			return False
+
+		voted = playerId in self.voteDict.keys()
+		return voted
 
 	def removeVote(self, playerId):
 		if playerId in self.voteDict.keys():
@@ -373,7 +377,8 @@ if __name__ == "__main__":
 									MSG_TOTAL_PLAYERS_WANTS.format(poll.totalVotes, poll.totalVotesNeedToWin()-poll.totalVotes))
 
 						disconnectedPlayerId = playerDisconnectedExtractor.extract(textLine)
-						if disconnectedPlayerId and poll.playerHasVoted(disconnectedPlayerId):
+
+						if poll.playerHasVoted(disconnectedPlayerId):
 							poll.removeVote(disconnectedPlayerId)
 							server.sendMessage(MSG_PLAYER_REMOVED_FROM_VOTES.format(disconnectedPlayerId))
 
