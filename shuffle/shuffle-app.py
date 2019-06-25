@@ -13,7 +13,6 @@ import datetime
 import time
 import os
 import socket
-import struct
 
 SERVER_LOG_PATH = '/home/alex/.ja/MBII/server.log'
 
@@ -37,17 +36,23 @@ VOTATION_MAX_TIME_TO_FAIL = 5
 
 MSG_TOTAL_PLAYERS_WANTS = '{}/{} players wants to shuffle the team!'
 
-MSG_PLAYER_WANT = '{} wants to Shuffle the team!'
+MSG_PLAYER_WANT = '{} ^7wants to Shuffle the team!'
 
-MSG_PLAYER_REMOVED_FROM_VOTES = 'Player {} was disconnected his \'shuffle\' vote was been removed.'
+MSG_PLAYER_REMOVED_FROM_VOTES = 'Player {} ^7was disconnected his \'shuffle\' vote was been removed.'
 
 DEFAULT_MESSAGE_DECODER = 'iso-8859-1'
 
-LOOP_TIME = 1
-
-LAMBDA_DIGITS = lambda x: int(filter(str.isdigit, x) or None)
+LOOP_TIME = 5
 
 IS_DEBUG_ENABLED = True
+
+SHUFFLE_ENABLED = 'Shuffle votation is enabled on the server! Say ^3!sf ^7or ^3!shuffle ^7for vote!'
+
+MIN_PLAYERS_TO_VOTE = 3
+
+MIN_PERCENT_PLAYERS_TO_WIN = 0.6
+
+getOnlyDigitsAsInt = lambda x: int(filter(str.isdigit, x) or None)
 
 class Console:
 	@staticmethod
@@ -60,19 +65,35 @@ class Console:
 			finalMessage = '({}) DEBUG: {}'.format(datetime.datetime.now(), message)
 			print(finalMessage)
 
-class LogFile():
+class LogFile:
 	def __init__(self, serverLogPath):
 		self.serverLogPath = serverLogPath
-		self._cached_stamp = 0
+		self._lastChangeTime = self.getChangeTime()
+		self.lastLineNumber = self.readAndGetLastLineNumber()
 
 	def read(self):
-		file = open(self.serverLogPath, 'r+')
-		return file
+		return open(self.serverLogPath, 'r+')
+
+	def readAsArray(self):
+		file = self.read()
+		lines = []
+
+		for line in file:
+			lines.append(line)
+
+		return lines
+
+	def readAndGetLastLineNumber(self):
+		return sum(1 for line in open(self.serverLogPath, 'r+'))
+	
+	def getChangeTime(self):
+		return os.stat(self.serverLogPath).st_mtime
 
 	def isChanged(self):
-		stamp = os.stat(self.serverLogPath).st_mtime
-		if stamp != self._cached_stamp:
-			self._cached_stamp = stamp
+		stamp = self.getChangeTime()
+		if stamp != self._lastChangeTime:
+			self._lastChangeTime = stamp
+			self.lastLineNumber = self.readAndGetLastLineNumber()
 			return True
 		else:
 			return False
@@ -90,7 +111,7 @@ class VoteExtractor:
 
 		messageId = result.group(1).strip()
 		playerId = result.group(2).strip()
-		playerName = result.group(4).strip()
+		playerName = result.group(4).strip().replace(':', '')#fix for regex
 		optionMessage = result.group(5).strip()
 		
 		return Vote(messageId, playerId, playerName, optionMessage)
@@ -108,7 +129,7 @@ class PlayerDisconnectedExtractor:
 
 		playerId = result.group(2).strip()
 
-		return int(LAMBDA_DIGITS(playerId))
+		return int(getOnlyDigitsAsInt(playerId))
 
 class Votation:
 
@@ -118,13 +139,9 @@ class Votation:
 	voteDict = {}
 	totalVotes = 0
 	totalPlayers = 0
-
-	MIN_PLAYERS_TO_VOTE = 3
-
-	MIN_PERCENT_PLAYERS_TO_WIN = 0.6
 	
 	def addVote(self, vote):
-		playerId = int(LAMBDA_DIGITS(vote.playerId))
+		playerId = int(getOnlyDigitsAsInt(vote.playerId))
 		self.voteDict[playerId] = vote
 
 	def playerHasVoted(self, playerId):
@@ -146,10 +163,10 @@ class Votation:
 		return self.totalVotes >= self.totalVotesNeedToWin()
 
 	def totalVotesNeedToWin(self):
-		if self.totalPlayers <= self.MIN_PLAYERS_TO_VOTE:
-			return self.MIN_PLAYERS_TO_VOTE
+		if self.totalPlayers <= MIN_PLAYERS_TO_VOTE:
+			return MIN_PLAYERS_TO_VOTE
 		
-		return int(round(self.MIN_PERCENT_PLAYERS_TO_WIN * self.totalPlayers))
+		return int(round(MIN_PERCENT_PLAYERS_TO_WIN * self.totalPlayers))
 
 	def __str__(self):
 		strx = """
@@ -235,7 +252,7 @@ class Server:
 
 		textNumber = result.group(2)	
 
-		return LAMBDA_DIGITS(textNumber)
+		return getOnlyDigitsAsInt(textNumber)
 
 	def recvWithTimeout(self, the_socket,timeout=2):
 		#make socket non blocking
@@ -269,56 +286,62 @@ class Server:
 
 
 if __name__ == "__main__":
-
 	logFile = LogFile(SERVER_LOG_PATH)
-
+	lastReadedLineNumber = logFile.lastLineNumber
 	voteExtractor = VoteExtractor(REGEX_SAY_COMMAND)
-
 	playerDisconnectedExtractor = PlayerDisconnectedExtractor(REGEX_PLAYER_Disconnected)
-
 	server = Server(SERVER_IP, SERVER_PORT, SERVER_RCON_PWD)
+
+	server.sendMessage(SHUFFLE_ENABLED)
+
+	votation = Votation()
 
 	while True:
 		time.sleep(LOOP_TIME)
 
-		votation = Votation()
-
 		if logFile.isChanged():
-
 			votation.totalPlayers = server.requestPlayerCount()
+			Console.debug('File has changed, reading the new lines only!')
+			text = logFile.readAsArray()
 
-			text = logFile.read()
-
-			for textLine in text:
-
+			for i in range(lastReadedLineNumber, logFile.lastLineNumber):
+				textLine = text[i]
+				Console.debug("line {}: {}".format(i, textLine))
 				vote = voteExtractor.extract(textLine)
 
-				if vote:
+				if vote and not votation.playerHasVoted(getOnlyDigitsAsInt(vote.playerId)):
 					votation.addVote(vote)
 					server.sendMessage(MSG_PLAYER_WANT.format(vote.playerName))
-				
-				disconnectedPlayerId = playerDisconnectedExtractor.extract(textLine)
 
+					if votation.totalVotes > 0:
+						server.sendMessage(MSG_TOTAL_PLAYERS_WANTS.format(votation.totalVotes, votation.totalPlayers))
+
+				disconnectedPlayerId = playerDisconnectedExtractor.extract(textLine)
 				if disconnectedPlayerId and votation.playerHasVoted(disconnectedPlayerId):
 					votation.removeVote(disconnectedPlayerId)
 					server.sendMessage(MSG_PLAYER_REMOVED_FROM_VOTES.format(disconnectedPlayerId))
-				
-				if votation.totalVotes > 0:
-					server.sendMessage(MSG_TOTAL_PLAYERS_WANTS.format(votation.totalVotes, votation.totalPlayers))
-			
-			votation.calculate()
 
+					if votation.totalVotes > 0:
+						server.sendMessage(MSG_TOTAL_PLAYERS_WANTS.format(votation.totalVotes, votation.totalPlayers))
+
+			lastReadedLineNumber = logFile.lastLineNumber
+			votation.calculate()
 			Console.info(votation)
 
 			if votation.isPassed():
-				server.sendShuffle()
-				server.sendMessage(MSG_TOTAL_PLAYERS_WANTS.format(votation.totalVotes, votation.totalPlayers))
 				server.sendMessage(MSG_VOTATION_PASS)
 				votation.reset()
-			else:
-				if votation.totalVotes > 0:
-					server.sendMessage(MSG_TOTAL_PLAYERS_WANTS.format(votation.totalVotes, votation.totalPlayers))
-			
+				server.sendShuffle()
+
+
+
+#TODO
+#Ao mudar de mapa, resetar o shuffle
+#Config externa
+#tempo limite de votacao
+#ao votar 2x nao exibir a mensagem
+#
+
 	
 
 			
