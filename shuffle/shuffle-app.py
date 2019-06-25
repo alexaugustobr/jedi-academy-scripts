@@ -28,6 +28,8 @@ Special thanks to:
 	* Jedi academy developer team
 	* Movie Battles 2 developer team
 	* OpenJediAcademy team
+	* Movie Battles 2 Brasil team
+	* Tigão
 
 Author: https://github.com/alexcologia33
 
