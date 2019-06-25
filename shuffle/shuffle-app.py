@@ -34,14 +34,13 @@ Author: https://github.com/alexcologia33
 Last version: https://github.com/alexcologia33/mb2-jedi-academy-scripts/tree/master/shuffle
 """
 
-import re
 import datetime
-import time
-import os
-import socket
 import json
-import unicodedata
 import os
+import re
+import socket
+import time
+import unicodedata
 
 CONFIG_FILE_NAME = 'shuffle-config.json'
 
