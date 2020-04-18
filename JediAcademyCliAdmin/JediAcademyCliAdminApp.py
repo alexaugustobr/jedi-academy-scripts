@@ -95,12 +95,12 @@ class App:
 
     def read_map_option(self):
         self.show_map_list()
-        number = raw_input("\nInsert the map number:\n")
+        number = int(raw_input("\nInsert the map number:\n"))
 
-        if number < 0 or len(map_cfg.maps_list) <= int(number):
+        if number < 0 or len(map_cfg.maps_list) <= number:
             raise RuntimeError("Map number {} not found".format(number))
 
-        map_name = map_cfg.maps_list[int(number)]
+        map_name = map_cfg.maps_list[number]
 
         return map_name
 
